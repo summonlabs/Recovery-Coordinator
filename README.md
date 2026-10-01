@@ -310,6 +310,4 @@ Not by reading the code. By behaviour:
 
 ## License
 
-Apache License 2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
-
-Copyright 2026 Summon Labs.
+Apache License 2.0. Copyright 2026 Summon Software Labs. No telemetry transmission.
