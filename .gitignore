@@ -1,0 +1,24 @@
+# Build and packaging output
+build/
+out/
+install/
+dist/
+
+# Local runtime state: journals, authority models, scratch spaces
+scratch/
+*.rcj
+*.rcj.lock
+*.rcj.staging
+*.world.json
+
+# Agent handoff notes are temporary and are removed before the release commit
+AGENT-*.md
+
+# Editor and tool noise
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+CMakeSettings.json
+CMakeUserPresets.json

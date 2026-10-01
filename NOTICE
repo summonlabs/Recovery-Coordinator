@@ -1,0 +1,17 @@
+Recovery Coordinator
+Copyright 2026 Summon Labs
+
+This product includes software developed for the Recovery Coordinator
+project (https://github.com/summonlabs/Recovery-Coordinator).
+
+The Recovery Coordinator implementation, its public API surface, its command
+line tools, and the synthetic adjacent-authority adapters used by its test
+suites were all written for this repository. No third-party runtime dependency
+is vendored, linked, or required: the SHA-256 and CRC-32C implementations, the
+canonical encoders, the strict JSON decoder, the durable journal format, and
+the synthetic facility model are part of this distribution.
+
+The synthetic adjacent-authority adapters model the behaviour of a power,
+cooling, capacity, workload, and network authority. They do not talk to, and
+are not derived from, any real facility management, building management, or
+data centre infrastructure product.
