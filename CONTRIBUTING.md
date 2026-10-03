@@ -44,8 +44,7 @@ RC_TEST(a_readiness_gate_blocks_dispatch_without_evidence) {
 ```
 
 A test must assert an invariant and must print the values that broke it. A test
-that cannot fail is not a test. Do not add a timeout to hide a hang: a hang in
-this project is a defect, and the suite is required to complete naturally.
+that cannot fail is not a test.
 
 ## The durable format is frozen
 
