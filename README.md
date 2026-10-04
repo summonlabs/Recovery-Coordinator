@@ -1,7 +1,6 @@
 # Recovery Coordinator
 
 ```
-# DCCP-Boundary:        52
 # Boundary-Name:        Facility Recovery Coordination Boundary
 # Boundary-Slug:        recovery-coordinator
 # Version:              1.0.0
@@ -33,7 +32,7 @@
 
 ## What this is
 
-Recovery Coordinator is the DCCP boundary 52 implementation. It answers one
+Recovery Coordinator is the implementation. It answers one
 question, and refuses to answer any other:
 
 > Given a facility incident and the current authoritative evidence, what ordered
