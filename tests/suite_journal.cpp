@@ -334,6 +334,41 @@ RC_TEST(journal_refuses_a_header_checksum_mismatch) {
     remove_journal(path);
 }
 
+// maxJournalBytes bounds the journal an open accepts. A journal that an append
+// was allowed to grow must stay one that an open with the same options accepts.
+RC_TEST(journal_append_stops_at_the_size_an_open_accepts) {
+    const std::string path = scratch("r2_journal_bound.rcj");
+    remove_journal(path);
+
+    const std::string payload(64, 'p');
+    JournalOptions options = create_options();
+    // Room for the header and four records of this size, and not for a fifth.
+    options.maxJournalBytes = kFileHeaderSize + 4 * record_size(payload.size()) + 8;
+    {
+        Journal journal;
+        (void)RC_REQUIRE_OK(journal.open(path, options, TimePoint{1000}, false, Duration{}));
+        for (int index = 0; index < 4; ++index) {
+            (void)RC_REQUIRE_OK(journal.append(RecordKind::Checkpoint, payload));
+        }
+        const Error error = RC_REQUIRE_ERR(journal.append(RecordKind::Checkpoint, payload),
+                                           ErrorClass::LimitExceeded);
+        RC_REQUIRE_MSG(!error.describe().empty(), "the refusal must say what was refused");
+        // The refused record left nothing behind, and a record that fits is
+        // still accepted.
+        RC_REQUIRE_EQ(journal.last_sequence(), std::uint64_t{4});
+        RC_REQUIRE_EQ(size_of(path), kFileHeaderSize + 4 * record_size(payload.size()));
+    }
+
+    JournalOptions again = options;
+    again.createIfMissing = false;
+    Journal reopened;
+    const JournalOpenInfo info =
+        RC_REQUIRE_OK(reopened.open(path, again, TimePoint{2000}, false, Duration{}));
+    RC_REQUIRE_EQ(info.lastSequence, std::uint64_t{4});
+    RC_REQUIRE_EQ(info.recordCount, std::uint64_t{4});
+    RC_REQUIRE_MSG(!info.tornTailRepaired, "a refused append must not leave a torn tail");
+}
+
 RC_TEST(a_second_journal_cannot_take_the_single_writer_lock) {
     const std::string path = scratch("r2_journal_lock.rcj");
     remove_journal(path);

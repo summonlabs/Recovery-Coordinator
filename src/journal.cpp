@@ -520,6 +520,15 @@ Result<Digest> Journal::append(RecordKind kind, std::string_view payload) {
     // buffer from the bytes it read and repeats the two derivations.
     const std::size_t payloadLength = payload.size();
     const std::size_t recordSize = kRecordPrefixSize + payloadLength + kRecordChainSize + kRecordTrailerSize;
+    // maxJournalBytes bounds the journal an open or a read accepts. A record
+    // that would take the journal past it is refused here: once appended, the
+    // journal could not be opened again with these options, although the
+    // record had been reported as committed.
+    if (impl_->append.size() > impl_->options.maxJournalBytes ||
+        recordSize > impl_->options.maxJournalBytes - impl_->append.size()) {
+        return errors::limit_exceeded("journal.full",
+                                      "the record would take the journal past the configured size limit");
+    }
     std::vector<std::uint8_t> record(recordSize, 0);
     std::memcpy(record.data(), kRecordMagic.data(), kRecordMagic.size());
     write_u16(record, 8, kRecordFormatVersion);
