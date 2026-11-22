@@ -7,6 +7,16 @@
 #include <utility>
 #include <vector>
 
+#if defined(_WIN32)
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#endif
+
 #include "recovery/fileio.hpp"
 #include "recovery/journal.hpp"
 
@@ -368,6 +378,63 @@ RC_TEST(journal_append_stops_at_the_size_an_open_accepts) {
     RC_REQUIRE_EQ(info.recordCount, std::uint64_t{4});
     RC_REQUIRE_MSG(!info.tornTailRepaired, "a refused append must not leave a torn tail");
 }
+
+#if defined(_WIN32)
+// A failed append can leave part of a record, or a record the device never
+// confirmed, behind the committed ones. A record appended after such a tail
+// would be a valid record behind a damaged one, which an open refuses as a
+// whole. The journal therefore cuts the file back to its committed size and
+// refuses appends until it is opened again. The failure is produced the way
+// another program can produce it: a byte-range lock on the region the next
+// record is written to.
+RC_TEST(journal_refuses_appends_after_a_failed_append_until_it_is_reopened) {
+    const std::string path = scratch("r2_journal_failed_append.rcj");
+    remove_journal(path);
+
+    const std::string payload(64, 'p');
+    std::uint64_t committedBytes = 0;
+    {
+        Journal journal;
+        (void)RC_REQUIRE_OK(journal.open(path, create_options(), TimePoint{1000}, false, Duration{}));
+        (void)RC_REQUIRE_OK(journal.append(RecordKind::Checkpoint, payload));
+        committedBytes = size_of(path);
+
+        const HANDLE other = CreateFileA(path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr,
+                                         OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+        RC_REQUIRE_MSG(other != INVALID_HANDLE_VALUE, "the test could not open the journal a second time");
+        OVERLAPPED range{};
+        range.Offset = static_cast<DWORD>(committedBytes);
+        const BOOL locked =
+            LockFileEx(other, LOCKFILE_EXCLUSIVE_LOCK | LOCKFILE_FAIL_IMMEDIATELY, 0, 1U << 20, 0, &range);
+        bool appendFailed = false;
+        if (locked != 0) {
+            appendFailed = !journal.append(RecordKind::Checkpoint, payload).has_value();
+            (void)UnlockFileEx(other, 0, 1U << 20, 0, &range);
+        }
+        CloseHandle(other);
+        RC_REQUIRE_MSG(locked != 0, "the test could not lock the end of the journal");
+        RC_REQUIRE_MSG(appendFailed, "an append into a locked region must fail");
+        RC_REQUIRE_EQ(journal.last_sequence(), std::uint64_t{1});
+
+        // The lock is gone, and the journal still refuses: it does not go on
+        // appending behind an append whose outcome it could not confirm.
+        const Error refused =
+            RC_REQUIRE_ERR(journal.append(RecordKind::Checkpoint, payload), ErrorClass::Persistence);
+        RC_REQUIRE_MSG(!refused.describe().empty(), "the refusal must say what was refused");
+        RC_REQUIRE_EQ(journal.last_sequence(), std::uint64_t{1});
+        RC_REQUIRE_EQ(size_of(path), committedBytes);
+    }
+
+    Journal reopened;
+    const JournalOpenInfo info =
+        RC_REQUIRE_OK(reopened.open(path, reopen_options(), TimePoint{2000}, false, Duration{}));
+    RC_REQUIRE_EQ(info.lastSequence, std::uint64_t{1});
+    RC_REQUIRE_EQ(info.recordCount, std::uint64_t{1});
+    RC_REQUIRE_MSG(!info.tornTailRepaired, "a failed append must not leave a torn tail");
+    (void)RC_REQUIRE_OK(reopened.append(RecordKind::Checkpoint, payload));
+    RC_REQUIRE_EQ(reopened.last_sequence(), std::uint64_t{2});
+}
+#endif
 
 RC_TEST(a_second_journal_cannot_take_the_single_writer_lock) {
     const std::string path = scratch("r2_journal_lock.rcj");

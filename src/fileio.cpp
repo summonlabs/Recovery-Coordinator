@@ -413,9 +413,11 @@ Result<bool> flush_handle(void* handle) {
 
 AppendHandle::~AppendHandle() { close(); }
 
-AppendHandle::AppendHandle(AppendHandle&& other) noexcept : handle_(other.handle_), size_(other.size_) {
+AppendHandle::AppendHandle(AppendHandle&& other) noexcept
+    : handle_(other.handle_), size_(other.size_), failed_(other.failed_) {
     other.handle_ = nullptr;
     other.size_ = 0;
+    other.failed_ = false;
 }
 
 AppendHandle& AppendHandle::operator=(AppendHandle&& other) noexcept {
@@ -423,8 +425,10 @@ AppendHandle& AppendHandle::operator=(AppendHandle&& other) noexcept {
         close();
         handle_ = other.handle_;
         size_ = other.size_;
+        failed_ = other.failed_;
         other.handle_ = nullptr;
         other.size_ = 0;
+        other.failed_ = false;
     }
     return *this;
 }
@@ -477,9 +481,47 @@ Result<bool> AppendHandle::append_and_flush(const std::vector<std::uint8_t>& byt
     if (handle_ == nullptr) {
         return errors::precondition_failed("fileio.closed", "the append handle is not open");
     }
+    // A failed append may have left part of a record, or a record the device
+    // never confirmed, behind the last committed one. Appending after that
+    // would put a valid record behind a damaged one (which an open refuses as
+    // a whole) or repeat a sequence number. The handle therefore cuts the file
+    // back to its committed size and refuses appends until the journal is
+    // opened again, which verifies what the file holds.
+    if (failed_) {
+        return errors::persistence("fileio.append_refused",
+                                   "an earlier journal append failed; the journal must be reopened before it is "
+                                   "appended to again");
+    }
     if (bytes.empty()) {
         return true;
     }
+    auto written = write_and_flush(bytes);
+    if (!written.has_value()) {
+        failed_ = true;
+        discard_uncommitted_tail();
+        return written.error();
+    }
+    size_ += bytes.size();
+    return true;
+}
+
+void AppendHandle::discard_uncommitted_tail() noexcept {
+#if defined(_WIN32)
+    LARGE_INTEGER position{};
+    position.QuadPart = static_cast<LONGLONG>(size_);
+    if (SetFilePointerEx(static_cast<HANDLE>(handle_), position, nullptr, FILE_BEGIN) != 0) {
+        (void)SetEndOfFile(static_cast<HANDLE>(handle_));
+    }
+#else
+    const int descriptor = static_cast<int>(reinterpret_cast<std::intptr_t>(handle_) - 1);
+    // When this fails too, the tail stays for the next open to judge; the handle
+    // refuses appends either way.
+    const int result = ::ftruncate(descriptor, static_cast<off_t>(size_));
+    (void)result;
+#endif
+}
+
+Result<bool> AppendHandle::write_and_flush(const std::vector<std::uint8_t>& bytes) {
 #if defined(_WIN32)
     DWORD written = 0;
     if (WriteFile(static_cast<HANDLE>(handle_), bytes.data(), static_cast<DWORD>(bytes.size()), &written, nullptr) == 0) {
@@ -505,7 +547,6 @@ Result<bool> AppendHandle::append_and_flush(const std::vector<std::uint8_t>& byt
         return errors::persistence("fileio.flush", "journal device flush failed");
     }
 #endif
-    size_ += bytes.size();
     return true;
 }
 
@@ -523,6 +564,7 @@ void AppendHandle::close() {
     }
 #endif
     size_ = 0;
+    failed_ = false;
 }
 
 }  // namespace fileio

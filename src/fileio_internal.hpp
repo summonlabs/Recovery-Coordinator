@@ -53,8 +53,13 @@ public:
     void close();
 
 private:
+    [[nodiscard]] Result<bool> write_and_flush(const std::vector<std::uint8_t>& bytes);
+    void discard_uncommitted_tail() noexcept;
+
     void* handle_{nullptr};
     std::uint64_t size_{0};
+    // Set by a failed append; cleared when the handle is closed or opened again.
+    bool failed_{false};
 };
 
 // Monotone nanoseconds from a source that never jumps backwards. Used only for
